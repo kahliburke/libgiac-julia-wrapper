@@ -736,14 +736,26 @@ std::string Gen::idnt_name() const {
 }
 
 std::string Gen::strng_value() const {
+    // REQ-C70, C74: Returns the string for _STRNG, throws otherwise
+    if (impl_->g.type != giac::_STRNG) {
+        throw std::runtime_error("gen is not a string");
+    }
     return *impl_->g._STRNGptr;
 }
 
 int32_t Gen::map_size() const {
+    // REQ-C71, C74: Returns entry count for _MAP, throws otherwise
+    if (impl_->g.type != giac::_MAP) {
+        throw std::runtime_error("gen is not a map");
+    }
     return static_cast<int32_t>(impl_->g._MAPptr->size());
 }
 
 Gen Gen::map_keys() const {
+    // REQ-C72, C74: Returns the keys for _MAP, throws otherwise
+    if (impl_->g.type != giac::_MAP) {
+        throw std::runtime_error("gen is not a map");
+    }
     giac::vecteur keys;
     for (const auto& pair : *impl_->g._MAPptr) {
         keys.push_back(pair.first);
@@ -752,6 +764,10 @@ Gen Gen::map_keys() const {
 }
 
 Gen Gen::map_values() const {
+    // REQ-C73, C74: Returns the values for _MAP, throws otherwise
+    if (impl_->g.type != giac::_MAP) {
+        throw std::runtime_error("gen is not a map");
+    }
     giac::vecteur values;
     for (const auto& pair : *impl_->g._MAPptr) {
         values.push_back(pair.second);

@@ -314,6 +314,46 @@ TEST(strng_value_valid) {
     std::cout << "strng_value(\"hello world\")=\"hello world\" ";
 }
 
+TEST(strng_value_throws_on_int) {
+    Gen g(static_cast<int64_t>(42));
+    bool threw = false;
+    try {
+        g.strng_value();
+    } catch (const std::runtime_error& e) {
+        threw = true;
+    }
+    assert(threw);
+    std::cout << "strng_value(42) throws ";
+}
+
+// ============================================================================
+// Map accessors
+// ============================================================================
+
+TEST(map_accessors_throw_on_int) {
+    Gen g(static_cast<int64_t>(42));
+    bool threw_size = false, threw_keys = false, threw_values = false;
+    try {
+        g.map_size();
+    } catch (const std::runtime_error& e) {
+        threw_size = true;
+    }
+    try {
+        g.map_keys();
+    } catch (const std::runtime_error& e) {
+        threw_keys = true;
+    }
+    try {
+        g.map_values();
+    } catch (const std::runtime_error& e) {
+        threw_values = true;
+    }
+    assert(threw_size);
+    assert(threw_keys);
+    assert(threw_values);
+    std::cout << "map_size/map_keys/map_values(42) throw ";
+}
+
 int main() {
     std::cout << "=== GIAC Wrapper Value Extraction Tests ===" << std::endl;
 
@@ -358,8 +398,12 @@ int main() {
     RUN_TEST(symb_funcname_throws_on_non_symbolic);
     RUN_TEST(symb_feuille_throws_on_non_symbolic);
 
-    // String accessor
+    // String accessor (REQ-C70, C74)
     RUN_TEST(strng_value_valid);
+    RUN_TEST(strng_value_throws_on_int);
+
+    // Map accessors (REQ-C71..C74)
+    RUN_TEST(map_accessors_throw_on_int);
 
     std::cout << "=== All extraction tests passed ===" << std::endl;
     return 0;
