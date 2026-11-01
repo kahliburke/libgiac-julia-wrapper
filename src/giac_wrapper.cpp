@@ -11,6 +11,7 @@
 #include <jlcxx/stl.hpp>
 
 #include "giac_impl.h"
+#include "gc_safe.h"
 
 JLCXX_MODULE define_julia_module(jlcxx::Module& mod)
 {
@@ -80,9 +81,9 @@ JLCXX_MODULE define_julia_module(jlcxx::Module& mod)
     // Register GiacContext type
     mod.add_type<GiacContext>("GiacContext")
         .constructor<>()
-        .method("giac_eval", &GiacContext::eval)
-        .method("set_variable", &GiacContext::set_variable)
-        .method("get_variable", &GiacContext::get_variable)
+        .method("giac_eval", gc_safe(&GiacContext::eval))
+        .method("set_variable", gc_safe(&GiacContext::set_variable))
+        .method("get_variable", gc_safe(&GiacContext::get_variable))
         .method("set_timeout", &GiacContext::set_timeout)
         .method("get_timeout", &GiacContext::get_timeout)
         .method("set_precision", &GiacContext::set_precision)
@@ -97,7 +98,7 @@ JLCXX_MODULE define_julia_module(jlcxx::Module& mod)
         .constructor<int64_t>()
         .constructor<double>()
         // String conversion
-        .method("to_string", &Gen::to_string)
+        .method("to_string", gc_safe(&Gen::to_string))
         // Type information
         .method("type", &Gen::type)
         .method("subtype", &Gen::subtype)
@@ -136,25 +137,30 @@ JLCXX_MODULE define_julia_module(jlcxx::Module& mod)
         .method("is_complex", &Gen::is_complex)
         .method("is_string", &Gen::is_string)
         // Operations
-        .method("gen_eval", &Gen::eval)  // Renamed to avoid conflict with giac_eval
-        .method("simplify", &Gen::simplify)
-        .method("expand", &Gen::expand)
-        .method("factor", &Gen::factor);
+        .method("gen_eval", gc_safe(&Gen::eval))  // Renamed to avoid conflict with giac_eval
+        .method("simplify", gc_safe(&Gen::simplify))
+        .method("expand", gc_safe(&Gen::expand))
+        .method("factor", gc_safe(&Gen::factor));
 
     // Register giac_eval free function (both overloads).
     // The (expr) overload uses the singleton thread-local context; the
     // (expr, ctx) overload provides per-context isolation (issue #3).
     mod.method("giac_eval",
-        static_cast<Gen(*)(const std::string&)>(&giac_eval));
+        gc_safe(static_cast<Gen(*)(const std::string&)>(&giac_eval)));
     mod.method("giac_eval",
-        static_cast<Gen(*)(const std::string&, GiacContext&)>(&giac_eval));
+        gc_safe(static_cast<Gen(*)(const std::string&, GiacContext&)>(&giac_eval)));
 
     // Register generic dispatch functions (Tier 2)
-    mod.method("apply_func0", &apply_func0);
-    mod.method("apply_func1", &apply_func1);
-    mod.method("apply_func2", &apply_func2);
-    mod.method("apply_func3", &apply_func3);
-    mod.method("apply_funcN", &apply_funcN);
+    mod.method("apply_func0", gc_safe(&apply_func0));
+    mod.method("apply_func1", gc_safe(&apply_func1));
+    mod.method("apply_func2", gc_safe(&apply_func2));
+    mod.method("apply_func3", gc_safe(&apply_func3));
+    mod.method("apply_funcN", gc_safe(&apply_funcN));
+
+    // Interruption: callable from any thread, while a computation runs on another
+    mod.method("giac_interrupt", &giac_interrupt);
+    mod.method("giac_clear_interrupt", &giac_clear_interrupt);
+    mod.method("giac_interrupt_pending", &giac_interrupt_pending);
 
     // Register function listing
     mod.method("list_builtin_functions", &list_builtin_functions);
@@ -163,48 +169,48 @@ JLCXX_MODULE define_julia_module(jlcxx::Module& mod)
 
     // Register Tier 1 direct wrappers (high-performance, no name lookup)
     // Trigonometry
-    mod.method("giac_sin", &giac_sin);
-    mod.method("giac_cos", &giac_cos);
-    mod.method("giac_tan", &giac_tan);
-    mod.method("giac_asin", &giac_asin);
-    mod.method("giac_acos", &giac_acos);
-    mod.method("giac_atan", &giac_atan);
+    mod.method("giac_sin", gc_safe(&giac_sin));
+    mod.method("giac_cos", gc_safe(&giac_cos));
+    mod.method("giac_tan", gc_safe(&giac_tan));
+    mod.method("giac_asin", gc_safe(&giac_asin));
+    mod.method("giac_acos", gc_safe(&giac_acos));
+    mod.method("giac_atan", gc_safe(&giac_atan));
 
     // Exponential / Logarithm
-    mod.method("giac_exp", &giac_exp);
-    mod.method("giac_ln", &giac_ln);
-    mod.method("giac_log10", &giac_log10);
-    mod.method("giac_sqrt", &giac_sqrt);
+    mod.method("giac_exp", gc_safe(&giac_exp));
+    mod.method("giac_ln", gc_safe(&giac_ln));
+    mod.method("giac_log10", gc_safe(&giac_log10));
+    mod.method("giac_sqrt", gc_safe(&giac_sqrt));
 
     // Arithmetic
-    mod.method("giac_abs", &giac_abs);
-    mod.method("giac_sign", &giac_sign);
-    mod.method("giac_floor", &giac_floor);
-    mod.method("giac_ceil", &giac_ceil);
+    mod.method("giac_abs", gc_safe(&giac_abs));
+    mod.method("giac_sign", gc_safe(&giac_sign));
+    mod.method("giac_floor", gc_safe(&giac_floor));
+    mod.method("giac_ceil", gc_safe(&giac_ceil));
 
     // Complex
-    mod.method("giac_re", &giac_re);
-    mod.method("giac_im", &giac_im);
-    mod.method("giac_conj", &giac_conj);
+    mod.method("giac_re", gc_safe(&giac_re));
+    mod.method("giac_im", gc_safe(&giac_im));
+    mod.method("giac_conj", gc_safe(&giac_conj));
 
     // Algebra
-    mod.method("giac_normal", &giac_normal);
-    mod.method("giac_evalf", &giac_evalf);
+    mod.method("giac_normal", gc_safe(&giac_normal));
+    mod.method("giac_evalf", gc_safe(&giac_evalf));
 
     // Calculus (multi-argument)
-    mod.method("giac_diff", &giac_diff);
-    mod.method("giac_integrate", &giac_integrate);
-    mod.method("giac_subst", &giac_subst);
-    mod.method("giac_solve", &giac_solve);
-    mod.method("giac_limit", &giac_limit);
-    mod.method("giac_series", &giac_series);
+    mod.method("giac_diff", gc_safe(&giac_diff));
+    mod.method("giac_integrate", gc_safe(&giac_integrate));
+    mod.method("giac_subst", gc_safe(&giac_subst));
+    mod.method("giac_solve", gc_safe(&giac_solve));
+    mod.method("giac_limit", gc_safe(&giac_limit));
+    mod.method("giac_series", gc_safe(&giac_series));
 
     // Arithmetic (multi-argument)
-    mod.method("giac_gcd", &giac_gcd);
-    mod.method("giac_lcm", &giac_lcm);
+    mod.method("giac_gcd", gc_safe(&giac_gcd));
+    mod.method("giac_lcm", gc_safe(&giac_lcm));
 
     // Power
-    mod.method("giac_pow", &giac_pow);
+    mod.method("giac_pow", gc_safe(&giac_pow));
 
     // ========================================================================
     // Gen Construction Functions (Feature 051: Direct to_giac)
@@ -221,7 +227,7 @@ JLCXX_MODULE define_julia_module(jlcxx::Module& mod)
     // ========================================================================
     mod.method("gen_to_heap_ptr", &gen_to_heap_ptr);
     mod.method("free_gen_ptr", &free_gen_ptr);
-    mod.method("gen_ptr_to_string", &gen_ptr_to_string);
+    mod.method("gen_ptr_to_string", gc_safe(&gen_ptr_to_string));
     mod.method("gen_ptr_type", &gen_ptr_type);
 
     // ========================================================================
@@ -231,32 +237,32 @@ JLCXX_MODULE define_julia_module(jlcxx::Module& mod)
 
     // Register Gen operators
     mod.set_override_module(jl_base_module);
-    mod.method("+", [](const Gen& a, const Gen& b) { return a + b; });
-    mod.method("-", [](const Gen& a, const Gen& b) { return a - b; });
-    mod.method("*", [](const Gen& a, const Gen& b) { return a * b; });
-    mod.method("/", [](const Gen& a, const Gen& b) { return a / b; });
-    mod.method("-", [](const Gen& a) { return -a; });
+    mod.method("+", [](const Gen& a, const Gen& b) { GCSafeRegion region; return a + b; });
+    mod.method("-", [](const Gen& a, const Gen& b) { GCSafeRegion region; return a - b; });
+    mod.method("*", [](const Gen& a, const Gen& b) { GCSafeRegion region; return a * b; });
+    mod.method("/", [](const Gen& a, const Gen& b) { GCSafeRegion region; return a / b; });
+    mod.method("-", [](const Gen& a) { GCSafeRegion region; return -a; });
     mod.method("==", [](const Gen& a, const Gen& b) { return a == b; });
     mod.method("!=", [](const Gen& a, const Gen& b) { return a != b; });
 
     // Mixed-type operators: Gen × int64_t
-    mod.method("+", [](const Gen& a, int64_t b) { return a + Gen(b); });
-    mod.method("+", [](int64_t a, const Gen& b) { return Gen(a) + b; });
-    mod.method("-", [](const Gen& a, int64_t b) { return a - Gen(b); });
-    mod.method("-", [](int64_t a, const Gen& b) { return Gen(a) - b; });
-    mod.method("*", [](const Gen& a, int64_t b) { return a * Gen(b); });
-    mod.method("*", [](int64_t a, const Gen& b) { return Gen(a) * b; });
-    mod.method("/", [](const Gen& a, int64_t b) { return a / Gen(b); });
-    mod.method("/", [](int64_t a, const Gen& b) { return Gen(a) / b; });
+    mod.method("+", [](const Gen& a, int64_t b) { GCSafeRegion region; return a + Gen(b); });
+    mod.method("+", [](int64_t a, const Gen& b) { GCSafeRegion region; return Gen(a) + b; });
+    mod.method("-", [](const Gen& a, int64_t b) { GCSafeRegion region; return a - Gen(b); });
+    mod.method("-", [](int64_t a, const Gen& b) { GCSafeRegion region; return Gen(a) - b; });
+    mod.method("*", [](const Gen& a, int64_t b) { GCSafeRegion region; return a * Gen(b); });
+    mod.method("*", [](int64_t a, const Gen& b) { GCSafeRegion region; return Gen(a) * b; });
+    mod.method("/", [](const Gen& a, int64_t b) { GCSafeRegion region; return a / Gen(b); });
+    mod.method("/", [](int64_t a, const Gen& b) { GCSafeRegion region; return Gen(a) / b; });
 
     // Mixed-type operators: Gen × double
-    mod.method("+", [](const Gen& a, double b) { return a + Gen(b); });
-    mod.method("+", [](double a, const Gen& b) { return Gen(a) + b; });
-    mod.method("-", [](const Gen& a, double b) { return a - Gen(b); });
-    mod.method("-", [](double a, const Gen& b) { return Gen(a) - b; });
-    mod.method("*", [](const Gen& a, double b) { return a * Gen(b); });
-    mod.method("*", [](double a, const Gen& b) { return Gen(a) * b; });
-    mod.method("/", [](const Gen& a, double b) { return a / Gen(b); });
-    mod.method("/", [](double a, const Gen& b) { return Gen(a) / b; });
+    mod.method("+", [](const Gen& a, double b) { GCSafeRegion region; return a + Gen(b); });
+    mod.method("+", [](double a, const Gen& b) { GCSafeRegion region; return Gen(a) + b; });
+    mod.method("-", [](const Gen& a, double b) { GCSafeRegion region; return a - Gen(b); });
+    mod.method("-", [](double a, const Gen& b) { GCSafeRegion region; return Gen(a) - b; });
+    mod.method("*", [](const Gen& a, double b) { GCSafeRegion region; return a * Gen(b); });
+    mod.method("*", [](double a, const Gen& b) { GCSafeRegion region; return Gen(a) * b; });
+    mod.method("/", [](const Gen& a, double b) { GCSafeRegion region; return a / Gen(b); });
+    mod.method("/", [](double a, const Gen& b) { GCSafeRegion region; return Gen(a) / b; });
     mod.unset_override_module();
 }

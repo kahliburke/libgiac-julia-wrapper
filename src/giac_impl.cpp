@@ -18,6 +18,7 @@
 
 #include "giac_impl.h"
 #include <mutex>
+#include <unordered_map>
 
 namespace giac_julia {
 
@@ -187,10 +188,30 @@ Gen giac_eval(const std::string& expr, GiacContext& ctx) {
 // Generic Dispatch Implementation
 // ============================================================================
 
+namespace {
+    // A command's function, looked up by name once: parsing the name on every call costs more
+    // than many commands. Only built-in functions are kept, since a user function can change.
+    giac::gen lookup_function(const std::string& name, giac::context* ctx) {
+        static std::mutex lock;
+        static std::unordered_map<std::string, giac::gen> functions;
+        {
+            std::lock_guard<std::mutex> guard(lock);
+            auto it = functions.find(name);
+            if (it != functions.end()) return it->second;
+        }
+        giac::gen f(name, ctx);
+        if (f.type == giac::_FUNC) {
+            std::lock_guard<std::mutex> guard(lock);
+            functions.emplace(name, f);
+        }
+        return f;
+    }
+}
+
 Gen apply_func0(const std::string& name) {
     initialize_giac_library();
     giac::context& ctx = get_thread_local_context();
-    giac::gen func_gen(name, &ctx);
+    giac::gen func_gen = lookup_function(name, &ctx);
 
     if (func_gen.type == giac::_FUNC) {
         // Direct symbolic construction with no arguments
@@ -207,7 +228,7 @@ Gen apply_func0(const std::string& name) {
 Gen apply_func1(const std::string& name, const Gen& arg) {
     initialize_giac_library();
     giac::context& ctx = get_thread_local_context();
-    giac::gen func_gen(name, &ctx);
+    giac::gen func_gen = lookup_function(name, &ctx);
 
     if (func_gen.type == giac::_FUNC) {
         // Direct symbolic construction - no serialization
@@ -224,7 +245,7 @@ Gen apply_func1(const std::string& name, const Gen& arg) {
 Gen apply_func2(const std::string& name, const Gen& arg1, const Gen& arg2) {
     initialize_giac_library();
     giac::context& ctx = get_thread_local_context();
-    giac::gen func_gen(name, &ctx);
+    giac::gen func_gen = lookup_function(name, &ctx);
 
     if (func_gen.type == giac::_FUNC) {
         // Create sequence with two arguments
@@ -245,7 +266,7 @@ Gen apply_func2(const std::string& name, const Gen& arg1, const Gen& arg2) {
 Gen apply_func3(const std::string& name, const Gen& arg1, const Gen& arg2, const Gen& arg3) {
     initialize_giac_library();
     giac::context& ctx = get_thread_local_context();
-    giac::gen func_gen(name, &ctx);
+    giac::gen func_gen = lookup_function(name, &ctx);
 
     if (func_gen.type == giac::_FUNC) {
         // Create sequence with three arguments
@@ -267,7 +288,7 @@ Gen apply_func3(const std::string& name, const Gen& arg1, const Gen& arg2, const
 Gen apply_funcN(const std::string& name, const std::vector<Gen>& args) {
     initialize_giac_library();
     giac::context& ctx = get_thread_local_context();
-    giac::gen func_gen(name, &ctx);
+    giac::gen func_gen = lookup_function(name, &ctx);
 
     if (func_gen.type == giac::_FUNC) {
         // Create sequence with N arguments
@@ -289,6 +310,23 @@ Gen apply_funcN(const std::string& name, const std::vector<Gen>& args) {
         giac::gen parsed(expr_str, &ctx);
         return Gen(std::make_unique<GenImpl>(giac::eval(parsed, &ctx)));
     }
+}
+
+// ============================================================================
+// Interruption
+// ============================================================================
+
+void giac_interrupt() {
+    giac::ctrl_c = true;
+}
+
+void giac_clear_interrupt() {
+    giac::ctrl_c = false;
+    giac::interrupted = false;
+}
+
+bool giac_interrupt_pending() {
+    return giac::ctrl_c || giac::interrupted;
 }
 
 // ============================================================================

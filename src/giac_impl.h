@@ -102,6 +102,20 @@ Gen apply_func3(const std::string& name, const Gen& arg1, const Gen& arg2, const
 Gen apply_funcN(const std::string& name, const std::vector<Gen>& args);
 
 // ============================================================================
+// Interruption
+// ============================================================================
+
+/// Ask the running GIAC computation to stop. Safe to call from any thread: it sets the flag
+/// GIAC checks in its long loops, and the computation ends with an error.
+void giac_interrupt();
+
+/// Clear GIAC's interruption flags, for the next computation.
+void giac_clear_interrupt();
+
+/// Whether an interruption is pending or happened in the last computation.
+bool giac_interrupt_pending();
+
+// ============================================================================
 // Function Listing
 // ============================================================================
 
