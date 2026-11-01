@@ -23,4 +23,5 @@ using Test
     include("test_symbolic.jl")
     include("test_highlevel.jl")
     include("test_convert.jl")
+    include("test_transfer.jl")
 end

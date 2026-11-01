@@ -8,6 +8,7 @@ test_names = [
   'test_warnings',
   'test_predicates',
   'test_extraction',
+  'test_transfer',
 ]
 
 foreach t : test_names
