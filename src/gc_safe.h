@@ -19,38 +19,35 @@
 namespace giac_julia {
 
 namespace detail {
-    // GMP's allocation through the C library, for while Julia's own functions must not be used
     inline void* plain_malloc(size_t n) { return std::malloc(n); }
     inline void* plain_realloc(void* p, size_t, size_t n) { return std::realloc(p, n); }
     inline void plain_free(void* p, size_t) { std::free(p); }
 }
 
-/// Marks the current thread GC-safe for its lifetime (also when an exception leaves it).
+/// Make GMP allocate through the C library, once, when the module loads.
 ///
-/// GIAC shares Julia's GMP, whose memory functions Julia sets to its counted allocators. Those
-/// may run a collection or reach a safepoint, which a GC-safe thread must not do, so GMP
-/// allocates through the C library for the duration. Both end in the same malloc, so memory
-/// allocated one way may be freed the other; only Julia's count of GMP memory is approximate.
+/// GIAC shares Julia's GMP, whose memory functions Julia sets to its counted allocators. Those may
+/// run a collection or reach a safepoint, which a thread in a GC-safe region must not do. The
+/// functions are process-wide, so switching them per call would mix the two ways between threads:
+/// memory counted when allocated and not when freed, or the reverse, corrupts Julia's heap size
+/// estimate. With the C library throughout, GMP memory (Julia's BigInt buffers included) is simply
+/// not counted towards Julia's collections; both end in the same malloc, so a buffer allocated
+/// before the switch is still freed correctly.
+inline void use_plain_gmp_allocation() {
+    mp_set_memory_functions(&detail::plain_malloc, &detail::plain_realloc, &detail::plain_free);
+}
+
+/// Marks the current thread GC-safe for its lifetime (also when an exception leaves it).
 class GCSafeRegion {
 public:
-    GCSafeRegion() : ptls_(jl_get_current_task()->ptls) {
-        mp_get_memory_functions(&alloc_, &realloc_, &free_);
-        mp_set_memory_functions(&detail::plain_malloc, &detail::plain_realloc, &detail::plain_free);
-        state_ = jl_gc_safe_enter(ptls_);
-    }
-    ~GCSafeRegion() {
-        jl_gc_safe_leave(ptls_, state_);
-        mp_set_memory_functions(alloc_, realloc_, free_);
-    }
+    GCSafeRegion() : ptls_(jl_get_current_task()->ptls), state_(jl_gc_safe_enter(ptls_)) {}
+    ~GCSafeRegion() { jl_gc_safe_leave(ptls_, state_); }
     GCSafeRegion(const GCSafeRegion&) = delete;
     GCSafeRegion& operator=(const GCSafeRegion&) = delete;
 
 private:
     jl_ptls_t ptls_;
-    int8_t state_ = 0;
-    void* (*alloc_)(size_t) = nullptr;
-    void* (*realloc_)(void*, size_t, size_t) = nullptr;
-    void (*free_)(void*, size_t) = nullptr;
+    int8_t state_;
 };
 
 // Each returns a lambda with the wrapped function's exact signature, which CxxWrap registers like

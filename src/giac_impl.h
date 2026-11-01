@@ -116,6 +116,28 @@ void giac_clear_interrupt();
 bool giac_interrupt_pending();
 
 // ============================================================================
+// Batched export of an expression tree
+// ============================================================================
+
+/// The tree of `g` serialized in one call, for Julia to read without a call per node. Preorder,
+/// little-endian, each node a tag byte then its payload:
+///   1 INT     int64
+///   2 ZINT    int32 sign, uint32 n, n bytes of magnitude (big-endian)
+///   3 DOUBLE  float64
+///   4 IDNT    uint32 n, n bytes of name
+///   5 FRAC    numerator node, denominator node (both integers)
+///   6 CPLX    real node, imaginary node (both numbers)
+///   7 SYMB    uint32 n, n bytes of head, uint32 k, then k argument nodes
+///   9 OPAQUE  uint32 index of the object, fetched with gen_export_opaque
+/// A symbolic node is written out when its head is an arithmetic operator, an identifier-like
+/// name, or one of the newline-separated `heads`; other objects (vectors, strings, products of
+/// integer powers such as ifactor's) are opaque.
+std::string gen_export(const Gen& g, const std::string& heads);
+
+/// The i-th opaque object (0-based) of the last gen_export on this thread.
+Gen gen_export_opaque(int32_t i);
+
+// ============================================================================
 // Function Listing
 // ============================================================================
 
@@ -434,6 +456,8 @@ private:
     // Friend functions that need access to private constructor
     friend Gen giac_eval(const std::string& expr);
     friend Gen giac_eval(const std::string& expr, GiacContext& ctx);
+    friend std::string gen_export(const Gen& g, const std::string& heads);
+    friend Gen gen_export_opaque(int32_t i);
     friend Gen apply_func0(const std::string& name);
     friend Gen apply_func1(const std::string& name, const Gen& arg);
     friend Gen apply_func2(const std::string& name, const Gen& arg1, const Gen& arg2);

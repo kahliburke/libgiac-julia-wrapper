@@ -17,6 +17,9 @@ JLCXX_MODULE define_julia_module(jlcxx::Module& mod)
 {
     using namespace giac_julia;
 
+    // GIAC's computations run GC-safe, so GMP must not allocate through Julia's counted functions
+    use_plain_gmp_allocation();
+
     // ========================================================================
     // Type Constants (EARS-CW-010–013)
     // ========================================================================
@@ -161,6 +164,10 @@ JLCXX_MODULE define_julia_module(jlcxx::Module& mod)
     mod.method("giac_interrupt", &giac_interrupt);
     mod.method("giac_clear_interrupt", &giac_clear_interrupt);
     mod.method("giac_interrupt_pending", &giac_interrupt_pending);
+
+    // Batched export of an expression tree (one call instead of one per node)
+    mod.method("gen_export", gc_safe(&gen_export));
+    mod.method("gen_export_opaque", &gen_export_opaque);
 
     // Register function listing
     mod.method("list_builtin_functions", &list_builtin_functions);

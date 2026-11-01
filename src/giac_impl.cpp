@@ -330,6 +330,159 @@ bool giac_interrupt_pending() {
 }
 
 // ============================================================================
+// Batched export
+// ============================================================================
+
+namespace {
+    thread_local std::vector<giac::gen> export_opaque;
+
+    void put_u8(std::string& o, uint8_t b) { o.push_back(static_cast<char>(b)); }
+    template <typename T> void put(std::string& o, T v) { o.append(reinterpret_cast<const char*>(&v), sizeof(T)); }
+    void put_str(std::string& o, const std::string& s) { put<uint32_t>(o, static_cast<uint32_t>(s.size())); o += s; }
+
+    void put_opaque(std::string& o, const giac::gen& g) {
+        put_u8(o, 9);
+        put<uint32_t>(o, static_cast<uint32_t>(export_opaque.size()));
+        export_opaque.push_back(g);
+    }
+
+    bool is_integer_gen(const giac::gen& g) { return g.type == giac::_INT_ || g.type == giac::_ZINT; }
+    bool is_number_gen(const giac::gen& g) {
+        return is_integer_gen(g) || g.type == giac::_DOUBLE_ ||
+               (g.type == giac::_FRAC && is_integer_gen(g._FRACptr->num) && is_integer_gen(g._FRACptr->den));
+    }
+
+    bool is_identifier_like(const std::string& h) {
+        if (h.empty() || !(std::isalpha(static_cast<unsigned char>(h[0])) || h[0] == '_')) return false;
+        for (char c : h)
+            if (!(std::isalnum(static_cast<unsigned char>(c)) || c == '_')) return false;
+        return true;
+    }
+
+    std::string head_name(const giac::gen& g, giac::context* ctx) { return g._SYMBptr->sommet.ptr()->print(ctx); }
+
+    // a product of powers of integers, as ifactor writes 2^3*3^2*5: a form, kept as GIAC has it
+    bool is_integer_power(const giac::gen& g, giac::context* ctx) {
+        if (g.type != giac::_SYMB || head_name(g, ctx) != "^") return false;
+        const giac::gen& f = g._SYMBptr->feuille;
+        return f.type == giac::_VECT && f._VECTptr->size() == 2 && is_integer_gen((*f._VECTptr)[0]) && is_integer_gen((*f._VECTptr)[1]);
+    }
+    bool is_factorization(const giac::gen& g, giac::context* ctx) {
+        if (is_integer_power(g, ctx)) return true;
+        if (g.type != giac::_SYMB || head_name(g, ctx) != "*") return false;
+        const giac::gen& f = g._SYMBptr->feuille;
+        if (f.type != giac::_VECT) return false;
+        bool power = false;
+        for (const giac::gen& x : *f._VECTptr) {
+            if (is_integer_power(x, ctx)) power = true;
+            else if (!is_integer_gen(x)) return false;
+        }
+        return power;
+    }
+
+    // the arguments of a symbolic node: a sequence spliced in, recursively
+    void push_args(std::vector<const giac::gen*>& out, const giac::gen& g) {
+        if (g.type == giac::_VECT && g.subtype == giac::_SEQ__VECT) {
+            for (const giac::gen& x : *g._VECTptr) push_args(out, x);
+        } else {
+            out.push_back(&g);
+        }
+    }
+
+    void write_gen(std::string& o, const giac::gen& g, const std::set<std::string>& heads, giac::context* ctx) {
+        switch (g.type) {
+        case giac::_INT_:
+            put_u8(o, 1);
+            put<int64_t>(o, static_cast<int64_t>(g.val));
+            return;
+        case giac::_ZINT: {
+            put_u8(o, 2);
+            put<int32_t>(o, mpz_sgn(*g._ZINTptr));
+            size_t count = 0;
+            void* data = mpz_sgn(*g._ZINTptr) == 0 ? nullptr : mpz_export(nullptr, &count, 1, 1, 1, 0, *g._ZINTptr);
+            put<uint32_t>(o, static_cast<uint32_t>(count));
+            if (data) {
+                o.append(static_cast<const char*>(data), count);
+                void (*free_fn)(void*, size_t);
+                mp_get_memory_functions(nullptr, nullptr, &free_fn);
+                free_fn(data, count);
+            }
+            return;
+        }
+        case giac::_DOUBLE_:
+            put_u8(o, 3);
+            put<double>(o, g._DOUBLE_val);
+            return;
+        case giac::_IDNT:
+            put_u8(o, 4);
+            put_str(o, g.print(ctx));
+            return;
+        case giac::_FRAC:
+            if (is_integer_gen(g._FRACptr->num) && is_integer_gen(g._FRACptr->den)) {
+                put_u8(o, 5);
+                write_gen(o, g._FRACptr->num, heads, ctx);
+                write_gen(o, g._FRACptr->den, heads, ctx);
+                return;
+            }
+            break;
+        case giac::_CPLX:
+            if (is_number_gen(*g._CPLXptr) && is_number_gen(*(g._CPLXptr + 1))) {
+                put_u8(o, 6);
+                write_gen(o, *g._CPLXptr, heads, ctx);
+                write_gen(o, *(g._CPLXptr + 1), heads, ctx);
+                return;
+            }
+            break;
+        case giac::_SYMB: {
+            std::string h = head_name(g, ctx);
+            bool arithmetic = h == "+" || h == "*" || h == "-" || h == "inv" || h == "^" || h == "/";
+            if ((arithmetic || heads.count(h) || is_identifier_like(h)) && !is_factorization(g, ctx)) {
+                const giac::gen& f = g._SYMBptr->feuille;
+                std::vector<const giac::gen*> args;
+                if (f.type == giac::_VECT && (f.subtype == giac::_SEQ__VECT || f.subtype == giac::_SORTED__VECT)) {
+                    for (const giac::gen& x : *f._VECTptr) push_args(args, x);
+                } else {
+                    args.push_back(&f);
+                }
+                put_u8(o, 7);
+                put_str(o, h);
+                put<uint32_t>(o, static_cast<uint32_t>(args.size()));
+                for (const giac::gen* a : args) write_gen(o, *a, heads, ctx);
+                return;
+            }
+            break;
+        }
+        default:
+            break;
+        }
+        put_opaque(o, g);
+    }
+}
+
+std::string gen_export(const Gen& g, const std::string& heads) {
+    giac::context& ctx = get_thread_local_context();
+    std::set<std::string> accepted;
+    size_t start = 0;
+    while (start <= heads.size()) {
+        size_t end = heads.find('\n', start);
+        if (end == std::string::npos) end = heads.size();
+        if (end > start) accepted.insert(heads.substr(start, end - start));
+        start = end + 1;
+    }
+    export_opaque.clear();
+    std::string out;
+    write_gen(out, g.impl_->g, accepted, &ctx);
+    return out;
+}
+
+Gen gen_export_opaque(int32_t i) {
+    if (i < 0 || static_cast<size_t>(i) >= export_opaque.size()) {
+        throw std::out_of_range("no such opaque object in the last export");
+    }
+    return Gen(std::make_unique<GenImpl>(export_opaque[static_cast<size_t>(i)]));
+}
+
+// ============================================================================
 // Function Listing Implementation
 // ============================================================================
 
