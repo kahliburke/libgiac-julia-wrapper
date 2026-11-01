@@ -137,6 +137,20 @@ std::string gen_export(const Gen& g, const std::string& heads);
 /// The i-th opaque object (0-based) of the last gen_export on this thread.
 Gen gen_export_opaque(int32_t i);
 
+/// A GIAC object built in one call from a program Julia writes, preorder and little-endian, each
+/// node a tag byte then its payload:
+///   1 INT     int64            2 ZINT  int32 sign, uint32 n, n magnitude bytes (big-endian)
+///   3 DOUBLE  float64          4 IDNT  uint32 n, n bytes of name (an identifier, not evaluated)
+///  10 NAMED   uint32 n, name, evaluated (pi, i, infinity, ...)
+///   5 FRAC    numerator, denominator          6 CPLX  real part, imaginary part
+///   9 OPAQUE  uint32 index into `opaque`
+///  11 SUM     uint32 k, k terms, added with GIAC's +
+///  13 POW     base, exponent (GIAC's pow, evaluated)
+///  14 TIMES   a, b (GIAC's *)      15 DIV  a, b (GIAC's /)      16 NEG  a (GIAC's unary -)
+///   7 CALL    uint32 n, head, uint32 k, k arguments: the head applied, unevaluated
+///  17 SEQ     uint32 k, k items: a sequence
+Gen gen_import(const std::string& program, const std::vector<Gen>& opaque);
+
 // ============================================================================
 // Function Listing
 // ============================================================================
@@ -458,6 +472,7 @@ private:
     friend Gen giac_eval(const std::string& expr, GiacContext& ctx);
     friend std::string gen_export(const Gen& g, const std::string& heads);
     friend Gen gen_export_opaque(int32_t i);
+    friend Gen gen_import(const std::string& program, const std::vector<Gen>& opaque);
     friend Gen apply_func0(const std::string& name);
     friend Gen apply_func1(const std::string& name, const Gen& arg);
     friend Gen apply_func2(const std::string& name, const Gen& arg1, const Gen& arg2);

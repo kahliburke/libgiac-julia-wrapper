@@ -168,6 +168,7 @@ JLCXX_MODULE define_julia_module(jlcxx::Module& mod)
     // Batched export of an expression tree (one call instead of one per node)
     mod.method("gen_export", gc_safe(&gen_export));
     mod.method("gen_export_opaque", &gen_export_opaque);
+    mod.method("gen_import", gc_safe(&gen_import));
 
     // Register function listing
     mod.method("list_builtin_functions", &list_builtin_functions);

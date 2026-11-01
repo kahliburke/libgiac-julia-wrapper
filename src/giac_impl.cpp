@@ -18,6 +18,7 @@
 
 #include "giac_impl.h"
 #include <mutex>
+#include <cstring>
 #include <unordered_map>
 
 namespace giac_julia {
@@ -480,6 +481,145 @@ Gen gen_export_opaque(int32_t i) {
         throw std::out_of_range("no such opaque object in the last export");
     }
     return Gen(std::make_unique<GenImpl>(export_opaque[static_cast<size_t>(i)]));
+}
+
+// ============================================================================
+// Batched import
+// ============================================================================
+
+namespace {
+    struct ProgramReader {
+        const std::string& p;
+        size_t pos = 0;
+        template <typename T> T get() {
+            if (pos + sizeof(T) > p.size()) throw std::runtime_error("gen_import: program ends early");
+            T v;
+            std::memcpy(&v, p.data() + pos, sizeof(T));
+            pos += sizeof(T);
+            return v;
+        }
+        std::string str() {
+            uint32_t n = get<uint32_t>();
+            if (pos + n > p.size()) throw std::runtime_error("gen_import: program ends early");
+            std::string s = p.substr(pos, n);
+            pos += n;
+            return s;
+        }
+    };
+
+    giac::gen apply_unevaluated(const std::string& name, const giac::vecteur& args, giac::context* ctx) {
+        const giac::unary_function_ptr* f = nullptr;
+        if (name == "+") f = giac::at_plus;
+        else if (name == "-") f = giac::at_neg;
+        else if (name == "*") f = giac::at_prod;
+        else if (name == "/") f = giac::at_division;
+        else if (name == "^") f = giac::at_pow;
+        else {
+            giac::gen g = lookup_function(name, ctx);
+            if (g.type != giac::_FUNC) throw std::runtime_error("Unknown function or operator: " + name);
+            f = g._FUNCptr;
+        }
+        if (args.size() == 1) return giac::symbolic(*f, args[0]);
+        return giac::symbolic(*f, giac::gen(args, giac::_SEQ__VECT));
+    }
+
+    giac::gen read_gen(ProgramReader& r, const std::vector<giac::gen>& opaque, giac::context* ctx) {
+        uint8_t tag = r.get<uint8_t>();
+        switch (tag) {
+        case 1: {
+            int64_t v = r.get<int64_t>();
+            if (v >= std::numeric_limits<int>::min() && v <= std::numeric_limits<int>::max()) return giac::gen(static_cast<int>(v));
+            return giac::gen(static_cast<long long>(v));
+        }
+        case 2: {
+            int32_t sign = r.get<int32_t>();
+            uint32_t n = r.get<uint32_t>();
+            if (r.pos + n > r.p.size()) throw std::runtime_error("gen_import: program ends early");
+            if (n == 0 || sign == 0) { r.pos += n; return giac::gen(0); }
+            mpz_t z;
+            mpz_init(z);
+            mpz_import(z, n, 1, 1, 1, 0, r.p.data() + r.pos);
+            r.pos += n;
+            if (sign < 0) mpz_neg(z, z);
+            giac::gen g(z);
+            mpz_clear(z);
+            return g;
+        }
+        case 3: return giac::gen(r.get<double>());
+        case 4: return giac::gen(giac::identificateur(r.str()));
+        case 10: return giac::eval(giac::gen(r.str(), ctx), ctx);
+        case 5: {
+            giac::gen num = read_gen(r, opaque, ctx);
+            giac::gen den = read_gen(r, opaque, ctx);
+            return giac::fraction(num, den);
+        }
+        case 6: {
+            giac::gen re = read_gen(r, opaque, ctx);
+            giac::gen im = read_gen(r, opaque, ctx);
+            return giac::gen(re, im);
+        }
+        case 9: {
+            uint32_t i = r.get<uint32_t>();
+            if (i >= opaque.size()) throw std::runtime_error("gen_import: no such opaque object");
+            return opaque[i];
+        }
+        case 11: {
+            uint32_t k = r.get<uint32_t>();
+            if (k == 0) return giac::gen(0);
+            giac::gen acc = read_gen(r, opaque, ctx);
+            for (uint32_t i = 1; i < k; ++i) acc = acc + read_gen(r, opaque, ctx);
+            return acc;
+        }
+        case 13: {
+            giac::gen b = read_gen(r, opaque, ctx);
+            giac::gen e = read_gen(r, opaque, ctx);
+            giac::vecteur args;
+            args.push_back(b);
+            args.push_back(e);
+            return giac::eval(giac::symbolic(giac::at_pow, giac::gen(args, giac::_SEQ__VECT)), ctx);
+        }
+        case 14: {
+            giac::gen a = read_gen(r, opaque, ctx);
+            giac::gen b = read_gen(r, opaque, ctx);
+            return a * b;
+        }
+        case 15: {
+            giac::gen a = read_gen(r, opaque, ctx);
+            giac::gen b = read_gen(r, opaque, ctx);
+            return a / b;
+        }
+        case 16: return -read_gen(r, opaque, ctx);
+        case 7: {
+            std::string name = r.str();
+            uint32_t k = r.get<uint32_t>();
+            giac::vecteur args;
+            args.reserve(k);
+            for (uint32_t i = 0; i < k; ++i) args.push_back(read_gen(r, opaque, ctx));
+            return apply_unevaluated(name, args, ctx);
+        }
+        case 17: {
+            uint32_t k = r.get<uint32_t>();
+            giac::vecteur items;
+            items.reserve(k);
+            for (uint32_t i = 0; i < k; ++i) items.push_back(read_gen(r, opaque, ctx));
+            return giac::gen(items, giac::_SEQ__VECT);
+        }
+        default:
+            throw std::runtime_error("gen_import: unknown tag " + std::to_string(tag));
+        }
+    }
+}
+
+Gen gen_import(const std::string& program, const std::vector<Gen>& opaque) {
+    initialize_giac_library();
+    giac::context& ctx = get_thread_local_context();
+    std::vector<giac::gen> objects;
+    objects.reserve(opaque.size());
+    for (const Gen& o : opaque) objects.push_back(o.impl_->g);
+    ProgramReader r{program};
+    giac::gen g = read_gen(r, objects, &ctx);
+    if (r.pos != program.size()) throw std::runtime_error("gen_import: program has trailing bytes");
+    return Gen(std::make_unique<GenImpl>(g));
 }
 
 // ============================================================================
