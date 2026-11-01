@@ -564,11 +564,14 @@ namespace {
             return opaque[i];
         }
         case 11: {
+            // the terms added at once: adding one at a time rebuilds the sum at every step
             uint32_t k = r.get<uint32_t>();
             if (k == 0) return giac::gen(0);
-            giac::gen acc = read_gen(r, opaque, ctx);
-            for (uint32_t i = 1; i < k; ++i) acc = acc + read_gen(r, opaque, ctx);
-            return acc;
+            giac::vecteur terms;
+            terms.reserve(k);
+            for (uint32_t i = 0; i < k; ++i) terms.push_back(read_gen(r, opaque, ctx));
+            if (k == 1) return terms[0];
+            return giac::_plus(giac::gen(terms, giac::_SEQ__VECT), ctx);
         }
         case 13: {
             giac::gen b = read_gen(r, opaque, ctx);
