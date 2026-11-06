@@ -73,6 +73,7 @@ JLCXX_MODULE define_julia_module(jlcxx::Module& mod)
     mod.method("giac_version", &get_giac_version);
     mod.method("wrapper_version", &get_wrapper_version);
     mod.method("is_giac_available", &check_giac_available);
+    mod.method("series_flags", &get_series_flags);
 
     // Register configuration functions
     mod.method("set_xcasroot", &set_xcasroot);

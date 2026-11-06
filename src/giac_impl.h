@@ -31,6 +31,10 @@ std::string get_giac_version();
 std::string get_wrapper_version();
 bool check_giac_available();
 
+/// GIAC's series_flags in the calling thread's context. Bit 3 is set only while a limit or series
+/// is being computed.
+int get_series_flags();
+
 // ============================================================================
 // Configuration Functions
 // ============================================================================

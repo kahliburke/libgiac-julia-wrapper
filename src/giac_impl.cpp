@@ -73,6 +73,35 @@ namespace {
 }
 
 // ============================================================================
+// Series flags
+// ============================================================================
+// GIAC's limit and series set bit 3 of series_flags while they work and clear it again only on a
+// normal return: when the computation throws, the bit stays set, and with it atan stops rewriting
+// its argument through tan, for the rest of the session. Each call into GIAC restores the bit to
+// what it was when the call began.
+
+namespace {
+    class SeriesFlagsGuard {
+    public:
+        explicit SeriesFlagsGuard(giac::context* ctx) : ctx_(ctx), bit_(giac::series_flags(ctx) & 8) {}
+        ~SeriesFlagsGuard() {
+            int& flags = giac::series_flags(ctx_);
+            flags = (flags & ~8) | bit_;
+        }
+        SeriesFlagsGuard(const SeriesFlagsGuard&) = delete;
+        SeriesFlagsGuard& operator=(const SeriesFlagsGuard&) = delete;
+
+    private:
+        giac::context* ctx_;
+        int bit_;
+    };
+}
+
+int get_series_flags() {
+    return giac::series_flags(&get_thread_local_context());
+}
+
+// ============================================================================
 // Library initialization
 // ============================================================================
 
@@ -168,6 +197,7 @@ int help_count() {
 Gen giac_eval(const std::string& expr) {
     initialize_giac_library();
     giac::context& ctx = get_thread_local_context();
+    SeriesFlagsGuard series_guard(&ctx);
     giac::gen parsed = giac::gen(expr, &ctx);
     giac::gen result = giac::eval(parsed, &ctx);
     return Gen(std::make_unique<GenImpl>(result));
@@ -176,6 +206,7 @@ Gen giac_eval(const std::string& expr) {
 Gen giac_eval(const std::string& expr, GiacContext& ctx) {
     initialize_giac_library();
     giac::context* gctx = ctx.impl_->ctx;
+    SeriesFlagsGuard series_guard(gctx);
     try {
         giac::gen parsed = giac::gen(expr, gctx);
         giac::gen result = giac::eval(parsed, gctx);
@@ -212,6 +243,7 @@ namespace {
 Gen apply_func0(const std::string& name) {
     initialize_giac_library();
     giac::context& ctx = get_thread_local_context();
+    SeriesFlagsGuard series_guard(&ctx);
     giac::gen func_gen = lookup_function(name, &ctx);
 
     if (func_gen.type == giac::_FUNC) {
@@ -229,6 +261,7 @@ Gen apply_func0(const std::string& name) {
 Gen apply_func1(const std::string& name, const Gen& arg) {
     initialize_giac_library();
     giac::context& ctx = get_thread_local_context();
+    SeriesFlagsGuard series_guard(&ctx);
     giac::gen func_gen = lookup_function(name, &ctx);
 
     if (func_gen.type == giac::_FUNC) {
@@ -246,6 +279,7 @@ Gen apply_func1(const std::string& name, const Gen& arg) {
 Gen apply_func2(const std::string& name, const Gen& arg1, const Gen& arg2) {
     initialize_giac_library();
     giac::context& ctx = get_thread_local_context();
+    SeriesFlagsGuard series_guard(&ctx);
     giac::gen func_gen = lookup_function(name, &ctx);
 
     if (func_gen.type == giac::_FUNC) {
@@ -267,6 +301,7 @@ Gen apply_func2(const std::string& name, const Gen& arg1, const Gen& arg2) {
 Gen apply_func3(const std::string& name, const Gen& arg1, const Gen& arg2, const Gen& arg3) {
     initialize_giac_library();
     giac::context& ctx = get_thread_local_context();
+    SeriesFlagsGuard series_guard(&ctx);
     giac::gen func_gen = lookup_function(name, &ctx);
 
     if (func_gen.type == giac::_FUNC) {
@@ -289,6 +324,7 @@ Gen apply_func3(const std::string& name, const Gen& arg1, const Gen& arg2, const
 Gen apply_funcN(const std::string& name, const std::vector<Gen>& args) {
     initialize_giac_library();
     giac::context& ctx = get_thread_local_context();
+    SeriesFlagsGuard series_guard(&ctx);
     giac::gen func_gen = lookup_function(name, &ctx);
 
     if (func_gen.type == giac::_FUNC) {
@@ -462,6 +498,7 @@ namespace {
 
 std::string gen_export(const Gen& g, const std::string& heads) {
     giac::context& ctx = get_thread_local_context();
+    SeriesFlagsGuard series_guard(&ctx);
     std::set<std::string> accepted;
     size_t start = 0;
     while (start <= heads.size()) {
@@ -616,6 +653,7 @@ namespace {
 Gen gen_import(const std::string& program, const std::vector<Gen>& opaque) {
     initialize_giac_library();
     giac::context& ctx = get_thread_local_context();
+    SeriesFlagsGuard series_guard(&ctx);
     std::vector<giac::gen> objects;
     objects.reserve(opaque.size());
     for (const Gen& o : opaque) objects.push_back(o.impl_->g);
@@ -684,6 +722,7 @@ std::string list_all_functions() {
     Gen giac_##name(const Gen& arg) { \
         initialize_giac_library(); \
         giac::context& ctx = get_thread_local_context(); \
+        SeriesFlagsGuard series_guard(&ctx); \
         giac::gen expr = giac::symbolic(giac::at_symbol, arg.impl_->g); \
         return Gen(std::make_unique<GenImpl>(giac::eval(expr, &ctx))); \
     }
@@ -693,6 +732,7 @@ std::string list_all_functions() {
     Gen giac_##name(const Gen& arg1, const Gen& arg2) { \
         initialize_giac_library(); \
         giac::context& ctx = get_thread_local_context(); \
+        SeriesFlagsGuard series_guard(&ctx); \
         giac::vecteur args; \
         args.push_back(arg1.impl_->g); \
         args.push_back(arg2.impl_->g); \
@@ -706,6 +746,7 @@ std::string list_all_functions() {
     Gen giac_##name(const Gen& arg1, const Gen& arg2, const Gen& arg3) { \
         initialize_giac_library(); \
         giac::context& ctx = get_thread_local_context(); \
+        SeriesFlagsGuard series_guard(&ctx); \
         giac::vecteur args; \
         args.push_back(arg1.impl_->g); \
         args.push_back(arg2.impl_->g); \
@@ -777,6 +818,7 @@ GiacContext::GiacContext(GiacContext&& other) noexcept = default;
 GiacContext& GiacContext::operator=(GiacContext&& other) noexcept = default;
 
 std::string GiacContext::eval(const std::string& input) {
+    SeriesFlagsGuard series_guard(impl_->ctx);
     try {
         giac::gen result = giac::eval(giac::gen(input, impl_->ctx), impl_->ctx);
         return result.print(impl_->ctx);
@@ -786,6 +828,7 @@ std::string GiacContext::eval(const std::string& input) {
 }
 
 void GiacContext::set_variable(const std::string& name, const std::string& value) {
+    SeriesFlagsGuard series_guard(impl_->ctx);
     try {
         giac::gen val(value, impl_->ctx);
         giac::sto(val, giac::gen(name, impl_->ctx), impl_->ctx);
@@ -795,6 +838,7 @@ void GiacContext::set_variable(const std::string& name, const std::string& value
 }
 
 std::string GiacContext::get_variable(const std::string& name) {
+    SeriesFlagsGuard series_guard(impl_->ctx);
     try {
         giac::gen result = giac::eval(giac::gen(name, impl_->ctx), impl_->ctx);
         return result.print(impl_->ctx);
@@ -844,6 +888,7 @@ Gen::Gen() : impl_(std::make_unique<GenImpl>()) {}
 Gen::Gen(const std::string& expr) : impl_(std::make_unique<GenImpl>()) {
     initialize_giac_library();  // Ensure GIAC is initialized
     giac::context& ctx = get_thread_local_context();
+    SeriesFlagsGuard series_guard(&ctx);
     impl_->g = giac::gen(expr, &ctx);
 }
 
@@ -882,6 +927,7 @@ Gen::Gen(std::unique_ptr<GenImpl> impl) : impl_(std::move(impl)) {}
 
 std::string Gen::to_string() const {
     giac::context& ctx = get_thread_local_context();
+    SeriesFlagsGuard series_guard(&ctx);
     return impl_->g.print(&ctx);
 }
 
@@ -946,6 +992,7 @@ double Gen::to_double() const {
 std::string Gen::zint_to_string() const {
     // Convert GMP big integer to string
     giac::context& ctx = get_thread_local_context();
+    SeriesFlagsGuard series_guard(&ctx);
     giac::gen bigint_gen = impl_->g;
     return bigint_gen.print(&ctx);
 }
@@ -1053,6 +1100,7 @@ std::string Gen::symb_sommet_name() const {
         throw std::runtime_error("gen is not symbolic");
     }
     giac::context& ctx = get_thread_local_context();
+    SeriesFlagsGuard series_guard(&ctx);
     return impl_->g._SYMBptr->sommet.ptr()->print(&ctx);
 }
 
@@ -1066,6 +1114,7 @@ Gen Gen::symb_feuille() const {
 
 std::string Gen::idnt_name() const {
     giac::context& ctx = get_thread_local_context();
+    SeriesFlagsGuard series_guard(&ctx);
     return impl_->g.print(&ctx);  // For identifiers, print gives the name
 }
 
@@ -1115,6 +1164,7 @@ Gen Gen::map_values() const {
 
 bool Gen::is_zero() const {
     giac::context& ctx = get_thread_local_context();
+    SeriesFlagsGuard series_guard(&ctx);
     return giac::is_zero(impl_->g, &ctx);
 }
 
@@ -1124,6 +1174,7 @@ bool Gen::is_one() const {
         return impl_->g.val == 1;
     }
     giac::context& ctx = get_thread_local_context();
+    SeriesFlagsGuard series_guard(&ctx);
     return giac::is_zero(impl_->g - giac::gen(1), &ctx);
 }
 
@@ -1133,6 +1184,7 @@ bool Gen::is_integer() const {
 
 bool Gen::is_approx() const {
     giac::context& ctx = get_thread_local_context();
+    SeriesFlagsGuard series_guard(&ctx);
     return giac::has_evalf(impl_->g, impl_->g, 1, &ctx);
 }
 
@@ -1179,21 +1231,25 @@ bool Gen::is_string() const {
 
 Gen Gen::eval() const {
     giac::context& ctx = get_thread_local_context();
+    SeriesFlagsGuard series_guard(&ctx);
     return Gen(std::make_unique<GenImpl>(giac::eval(impl_->g, &ctx)));
 }
 
 Gen Gen::simplify() const {
     giac::context& ctx = get_thread_local_context();
+    SeriesFlagsGuard series_guard(&ctx);
     return Gen(std::make_unique<GenImpl>(giac::simplify(impl_->g, &ctx)));
 }
 
 Gen Gen::expand() const {
     giac::context& ctx = get_thread_local_context();
+    SeriesFlagsGuard series_guard(&ctx);
     return Gen(std::make_unique<GenImpl>(giac::expand(impl_->g, &ctx)));
 }
 
 Gen Gen::factor() const {
     giac::context& ctx = get_thread_local_context();
+    SeriesFlagsGuard series_guard(&ctx);
     // Use _factor which is available in most GIAC versions
     giac::gen result = giac::eval(giac::symbolic(giac::at_factor, impl_->g), &ctx);
     return Gen(std::make_unique<GenImpl>(result));
@@ -1273,6 +1329,7 @@ Gen make_zint_from_bytes(const std::vector<uint8_t>& bytes, int32_t sign) {
 Gen make_symbolic_unevaluated(const std::string& op_name, const std::vector<Gen>& args) {
     initialize_giac_library();
     giac::context& ctx = get_thread_local_context();
+    SeriesFlagsGuard series_guard(&ctx);
 
     // Get the function pointer
     const giac::unary_function_ptr* func_ptr = nullptr;

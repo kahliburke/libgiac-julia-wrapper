@@ -75,6 +75,20 @@ TEST(giac_available) {
     assert(check_giac_available());
 }
 
+// A limit that fails leaves GIAC's series_flags as they were: with bit 3 left set, atan stops
+// rewriting through tan, and acot(cot(pi/90)) no longer simplifies
+TEST(failed_limit_restores_series_flags) {
+    const char* failing = "limit(x^(b+1)/(b+1)*ln(x),x,0,1)";
+    const char* check = "simplify(180*acot(cot(pi/90))/pi)";
+    try { giac_eval(failing); } catch (const std::exception&) {}
+    assert((get_series_flags() & 8) == 0);
+    ASSERT_EQ("2", giac_eval(check).to_string());
+
+    GiacContext ctx;
+    try { ctx.eval(failing); } catch (const std::exception&) {}
+    ASSERT_EQ("2", ctx.eval(check));
+}
+
 int main() {
     std::cout << "=== GIAC Wrapper Eval Tests ===" << std::endl;
 
@@ -83,6 +97,7 @@ int main() {
     RUN_TEST(basic_eval);
     RUN_TEST(factor_operation);
     RUN_TEST(error_handling);
+    RUN_TEST(failed_limit_restores_series_flags);
 
     std::cout << "=== All tests passed ===" << std::endl;
     return 0;
